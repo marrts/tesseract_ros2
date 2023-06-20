@@ -1631,7 +1631,7 @@ void toMsg(tesseract_msgs::msg::JointTrajectory& traj_msg, const tesseract_commo
     for (int i = 0; i < js.acceleration.size(); ++i)
       js_msg.acceleration[static_cast<size_t>(i)] = js.acceleration(i);
 
-    js_msg.time_from_start = rclcpp::Duration(js.time);
+    js_msg.time_from_start = js.time;
     traj_msg.states.push_back(js_msg);
   }
 }
@@ -1658,7 +1658,7 @@ tesseract_common::JointTrajectory fromMsg(const tesseract_msgs::msg::JointTrajec
     for (std::size_t i = 0; i < js_msg.acceleration.size(); ++i)
       js.acceleration(static_cast<long>(i)) = js_msg.acceleration[i];
 
-    js.time = js_msg.time_from_start.sec;
+    js.time = js_msg.time_from_start;
     trajectory.push_back(js);
   }
   return trajectory;
@@ -1685,7 +1685,7 @@ void toMsg(std::vector<tesseract_msgs::msg::JointState>& traj_msg, const tessera
     for (int i = 0; i < js.acceleration.size(); ++i)
       js_msg.acceleration[static_cast<size_t>(i)] = js.acceleration(i);
 
-    js_msg.time_from_start = rclcpp::Duration::from_seconds(js.time);
+    js_msg.time_from_start = js.time;
     traj_msg.push_back(js_msg);
   }
 }
@@ -1712,7 +1712,7 @@ tesseract_common::JointTrajectory fromMsg(const std::vector<tesseract_msgs::msg:
     for (std::size_t i = 0; i < js_msg.acceleration.size(); ++i)
       js.acceleration(static_cast<long>(i)) = js_msg.acceleration[i];
 
-    js.time = js_msg.time_from_start.sec;
+    js.time = js_msg.time_from_start;
     trajectory.push_back(js);
   }
   return trajectory;
@@ -2351,7 +2351,9 @@ tesseract_common::JointTrajectory fromMsg(const trajectory_msgs::msg::JointTraje
                                                            static_cast<Eigen::Index>(state_msg.accelerations.size()));
     state.effort =
         Eigen::Map<const Eigen::VectorXd>(state_msg.effort.data(), static_cast<Eigen::Index>(state_msg.effort.size()));
-    state.time = state_msg.time_from_start.sec;
+    double time_from_start = static_cast<double>(state_msg.time_from_start.sec);
+    time_from_start += static_cast<double>(state_msg.time_from_start.nanosec) / 1e9;
+    state.time = time_from_start;
     joint_trajectory.push_back(state);
   }
   return joint_trajectory;
