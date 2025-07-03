@@ -353,10 +353,9 @@ void CurrentStateMonitor::jointStateCallback(const sensor_msgs::msg::JointState:
       env_state_ = env_->getState(env_state_.joints);
   }
 
-  // callbacks, if needed
-  if (update)
-    for (auto& update_callback : update_callbacks_)
-      update_callback(joint_state);
+  // callbacks, if needed - always call for timestamp updates even if joints didn't move
+  for (auto& update_callback : update_callbacks_)
+    update_callback(joint_state);
 
   // notify waitForCurrentState() *after* potential update callbacks
   state_update_condition_.notify_all();
