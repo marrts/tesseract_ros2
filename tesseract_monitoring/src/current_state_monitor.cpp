@@ -118,9 +118,9 @@ void CurrentStateMonitor::startStateMonitor(const std::string& joint_states_topi
     }
 
     joint_state_subscriber_ = node_->create_subscription<sensor_msgs::msg::JointState>(
-        joint_states_topic,
-        rclcpp::QoS(20),
-        std::bind(&CurrentStateMonitor::jointStateCallback, this, std::placeholders::_1));  // NOLINT
+      joint_states_topic,
+      rclcpp::SensorDataQoS(),
+      std::bind(&CurrentStateMonitor::jointStateCallback, this, std::placeholders::_1));  // NOLINT
 
     state_monitor_started_ = true;
     monitor_start_time_ = node_->now();
