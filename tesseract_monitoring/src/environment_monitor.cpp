@@ -391,6 +391,10 @@ void ROSEnvironmentMonitor::stopMonitoringEnvironment()
   modify_monitored_environment_client_.reset();
   get_monitored_environment_information_client_.reset();
   monitored_environment_subscriber_.reset();
+  monitor_env_info_future_ = rclcpp::Client<tesseract_msgs::srv::GetEnvironmentInformation>::SharedFuture();
+  monitor_env_info_request_in_flight_ = false;
+  monitored_environment_topic_.clear();
+  monitored_environment_information_service_name_.clear();
   RCLCPP_INFO(logger_, "Stopped monitoring environment.");
 }
 
@@ -410,6 +414,8 @@ void ROSEnvironmentMonitor::startMonitoringEnvironment(const std::string& monito
       R"(/)" + monitored_namespace + DEFAULT_GET_ENVIRONMENT_INFORMATION_SERVICE;
 
   stopMonitoringEnvironment();
+  monitored_environment_topic_ = monitored_environment_topic;
+  monitored_environment_information_service_name_ = monitored_environment_information_service;
 
   get_monitored_environment_changes_client_ =
       internal_node_->create_client<tesseract_msgs::srv::GetEnvironmentChanges>(monitored_environment_changes_service,
@@ -460,18 +466,88 @@ void ROSEnvironmentMonitor::newEnvironmentStateCallback(
 
   if (!env_->isInitialized())
   {
-    auto get_env_info_req = std::make_shared<tesseract_msgs::srv::GetEnvironmentInformation::Request>();
-    get_env_info_req->flags = tesseract_msgs::srv::GetEnvironmentInformation::Request::COMMAND_HISTORY |
-                              tesseract_msgs::srv::GetEnvironmentInformation::Request::KINEMATICS_INFORMATION;
-
-    auto gei_result_future = get_monitored_environment_information_client_->async_send_request(get_env_info_req);
-    gei_result_future.wait();
-    auto gei_res = gei_result_future.get();
-    if (!gei_res->success)
+    if (!monitor_env_info_request_in_flight_)
     {
-      RCLCPP_ERROR_STREAM(logger_, "newEnvironmentStateCallback: Failed to get monitor environment information!");
+      if (!get_monitored_environment_information_client_ ||
+          !get_monitored_environment_information_client_->service_is_ready())
+      {
+        RCLCPP_WARN_THROTTLE(
+            logger_,
+            *internal_node_->get_clock(),
+            5000,
+            "newEnvironmentStateCallback: Received environment state on '%s' (id='%s', revision=%lu) but bootstrap "
+            "service '%s' is not ready yet. Waiting to retry.",
+            monitored_environment_topic_.c_str(),
+            env_msg->id.c_str(),
+            static_cast<unsigned long>(env_msg->revision),
+            monitored_environment_information_service_name_.c_str());
+        return;
+      }
+
+      auto get_env_info_req = std::make_shared<tesseract_msgs::srv::GetEnvironmentInformation::Request>();
+      get_env_info_req->flags = tesseract_msgs::srv::GetEnvironmentInformation::Request::COMMAND_HISTORY |
+                                tesseract_msgs::srv::GetEnvironmentInformation::Request::KINEMATICS_INFORMATION;
+
+      auto gei_result_future = get_monitored_environment_information_client_->async_send_request(get_env_info_req);
+      monitor_env_info_future_ = gei_result_future.future.share();
+      monitor_env_info_request_in_flight_ = true;
+      monitor_env_info_request_start_ = std::chrono::steady_clock::now();
+      RCLCPP_INFO(
+          logger_,
+          "newEnvironmentStateCallback: Received first environment state on '%s' (id='%s', revision=%lu); "
+          "requesting bootstrap state from '%s'.",
+          monitored_environment_topic_.c_str(),
+          env_msg->id.c_str(),
+          static_cast<unsigned long>(env_msg->revision),
+          monitored_environment_information_service_name_.c_str());
       return;
     }
+
+    if (monitor_env_info_future_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+    {
+      const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - monitor_env_info_request_start_)
+                               .count();
+      if (elapsed >= 2.0)
+      {
+        RCLCPP_WARN_THROTTLE(
+            logger_,
+            *internal_node_->get_clock(),
+            5000,
+            "newEnvironmentStateCallback: Bootstrap request to '%s' is still pending after %.1f s while monitoring "
+            "'%s' (latest id='%s', revision=%lu).",
+            monitored_environment_information_service_name_.c_str(),
+            elapsed,
+            monitored_environment_topic_.c_str(),
+            env_msg->id.c_str(),
+            static_cast<unsigned long>(env_msg->revision));
+      }
+      return;
+    }
+
+    auto gei_res = monitor_env_info_future_.get();
+    const auto bootstrap_elapsed =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - monitor_env_info_request_start_).count();
+    monitor_env_info_future_ = rclcpp::Client<tesseract_msgs::srv::GetEnvironmentInformation>::SharedFuture();
+    monitor_env_info_request_in_flight_ = false;
+
+    if (!gei_res->success)
+    {
+      RCLCPP_ERROR(
+          logger_,
+          "newEnvironmentStateCallback: Bootstrap request to '%s' failed after %.3f s.",
+          monitored_environment_information_service_name_.c_str(),
+          bootstrap_elapsed);
+      return;
+    }
+
+    RCLCPP_INFO(
+        logger_,
+        "newEnvironmentStateCallback: Bootstrap state received from '%s' after %.3f s (commands=%zu, "
+        "kinematic_groups=%zu).",
+        monitored_environment_information_service_name_.c_str(),
+        bootstrap_elapsed,
+        gei_res->command_history.size(),
+        gei_res->kinematics_information.group_names.size());
 
     tesseract_environment::Commands commands;
     try
@@ -489,6 +565,13 @@ void ROSEnvironmentMonitor::newEnvironmentStateCallback(
       RCLCPP_ERROR_STREAM(logger_, "newEnvironmentStateCallback: Failed to initialize environment!");
       return;
     }
+
+    RCLCPP_INFO(
+        logger_,
+        "newEnvironmentStateCallback: Environment bootstrap completed for id='%s' at revision=%d with %zu links.",
+        env_->getName().c_str(),
+        env_->getRevision(),
+        env_->getLinkNames().size());
 
     if (!initialize())
     {

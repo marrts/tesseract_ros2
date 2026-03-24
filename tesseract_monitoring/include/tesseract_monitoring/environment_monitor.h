@@ -191,6 +191,11 @@ protected:
   rclcpp::Client<tesseract_msgs::srv::ModifyEnvironment>::SharedPtr modify_monitored_environment_client_;
   rclcpp::Client<tesseract_msgs::srv::GetEnvironmentInformation>::SharedPtr
       get_monitored_environment_information_client_;
+  rclcpp::Client<tesseract_msgs::srv::GetEnvironmentInformation>::SharedFuture monitor_env_info_future_;
+  bool monitor_env_info_request_in_flight_{ false };
+  std::chrono::steady_clock::time_point monitor_env_info_request_start_{};
+  std::string monitored_environment_topic_;
+  std::string monitored_environment_information_service_name_;
 
   // host a service for modifying the environment
   rclcpp::Service<tesseract_msgs::srv::ModifyEnvironment>::SharedPtr modify_environment_service_;
