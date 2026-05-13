@@ -112,7 +112,8 @@ ROSSceneGraphRenderManager::~ROSSceneGraphRenderManager() { data_->clear(); }
 
 void ROSSceneGraphRenderManager::render()
 {
-  if (events_.empty())
+  auto events = takeEvents();
+  if (events.empty())
     return;
 
   auto getEntityManager = [this](const std::shared_ptr<const tesseract_gui::ComponentInfo>& component_info)
@@ -126,7 +127,7 @@ void ROSSceneGraphRenderManager::render()
     return entity_manager;
   };
 
-  for (const auto& event : events_)
+  for (const auto& event : events)
   {
     if (event->type() == tesseract_gui::events::EventType::SCENE_GRAPH_CLEAR)
     {
@@ -347,7 +348,6 @@ void ROSSceneGraphRenderManager::render()
     }
   }
 
-  events_.clear();
 }
 
 }  // namespace tesseract_rviz
